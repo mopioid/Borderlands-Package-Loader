@@ -1,0 +1,19 @@
+[project]
+name = "Package Loader"
+version = "1.0"
+authors = [{ name = "mopioid" }]
+description = """
+A library for the Borderlands SDK that allows multiple mods to load large numbers of packages in an
+efficient and user-friendly way.
+"""
+
+[project.urls]
+Homepage = "https://github.com/mopioid/Borderlands-Package-Loader"
+Repository = "https://github.com/mopioid/Borderlands-Package-Loader.git"
+"Bug Tracker" = "https://github.com/mopioid/Borderlands-Package-Loader/issues"
+
+[tool.sdkmod]
+name = "Package Loader"
+supported_games = ["BL2", "TPS"]
+download = "https://github.com/mopioid/Borderlands-Package-Loader/raw/refs/heads/master/package_loader.sdkmod"
+license = { name = "MIT", url = "https://choosealicense.com/licenses/mit/" }
