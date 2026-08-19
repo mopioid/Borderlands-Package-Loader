@@ -7,9 +7,6 @@ from ._groups import (
     group_packages,
 )
 
-import threading
-from queue import SimpleQueue, Empty as QueueEmpty
-
 from mods_base import Mod, get_pc, hook
 
 from unrealsdk import find_all, find_class, load_package
@@ -70,10 +67,6 @@ playthrough: int
 
 handler_mods: dict[LoadHandler, Mod]
 package_groups: list[PackageGroup]
-
-thread: threading.Thread
-package_group_lock: threading.Lock
-completed_queue: SimpleQueue[PackageGroup]
 
 gfx_dialog: UObject
 loading_message: str
@@ -202,28 +195,17 @@ def probe_mods() -> None:
 
 
 def begin_loading() -> None:
-    global loaded_package_count, completed_queue, package_group_lock, thread
+    global loaded_package_count
 
     update_dialog(title="Loading Data", message=loading_message + "0%", tooltips="")
 
     loaded_package_count = 0
-    completed_queue = SimpleQueue()
-    package_group_lock = threading.Lock()
 
     if dev_mode:
         _memory.IDLE_MEMORY_WAIT = 1.5
         _memory.force_gc()
     else:
         _memory.IDLE_MEMORY_WAIT = 0.5
-        _memory.pause_gc()
-
-    stack_size = threading.stack_size()
-    threading.stack_size(1024 * 1024 * 128)
-
-    thread = threading.Thread(target=load_worker)
-    thread.start()
-
-    threading.stack_size(stack_size)
 
     Frontend_LaunchSaveGameEx.disable()
     Viewport_Tick.enable()
@@ -231,87 +213,63 @@ def begin_loading() -> None:
 
 @hook("WillowGame.WillowGameViewportClient:Tick")
 def Viewport_Tick(_1: UObject, _2: WrappedStruct, _3: Any, _4: BoundFunction) -> None:
-    global loaded_package_count
+    global package_groups, dialog_ticks, total_package_count, loaded_package_count
 
-    while True:
-        try:
-            group = completed_queue.get_nowait()
-        except QueueEmpty:
-            break
+    if _memory.tick_gc():
+        return
 
-        print(f"Completed package group: {group.packages}")
+    if len(package_groups):
+        group = package_groups.pop(0)
 
-        for handler, target in tuple(group.all_loads()):
-            if handler not in handler_mods:
-                continue
-
-            load_iterator._next = target
-            load_iterator._allow_next = True
-            try:
-                next(handler)
-            except Exception as exception:
-                del handler_mods[handler]
-                with package_group_lock:
-                    for package_group in package_groups:
-                        package_group.remove_handler(handler)
-
-                if not isinstance(exception, StopIteration):
-                    print_exception(exception)
-                break
-
-        loaded_percentage = f"{loaded_package_count / total_package_count * 100:.0f}%"
-        update_dialog(message=loading_message + loaded_percentage)
-
-    _memory.tick_gc()
-
-    if not thread.is_alive():
-        if loaded_package_count:
-            _memory.resume_gc()
-            loaded_package_count = 0
-        elif not _memory.garbage_collecting:
-            complete_loading()
-
-
-def load_worker() -> None:
-    global loaded_package_count
-
-    if dev_mode:
-        _memory.await_gc()
-
-    for package_group in package_groups:
-        with package_group_lock:
-            if not (packages := package_group.get_load_sequence()):
-                continue
-
+        packages = group.get_load_sequence()
         for package in packages:
             load_package(package)
 
+        for handler, load in tuple(group.all_loads()):
+            if handler not in handler_mods:
+                continue
+
+            load_iterator._next = load
+            load_iterator._allow_next = True
+            try:
+                next(handler)
+
+            except Exception as exception:
+                del handler_mods[handler]
+
+                total_package_count = 0
+                for package_group in package_groups:
+                    package_group.remove_handler(handler)
+
+                    if len(package_group.handler_loads):
+                        total_package_count += len(package_group.packages)
+                    else:
+                        package_groups.remove(package_group)
+
+                if not isinstance(exception, StopIteration):
+                    print_exception(exception)
+
         loaded_package_count += len(packages)
-        completed_queue.put(package_group)
+        loaded_percentage = f"{loaded_package_count / total_package_count * 100:.0f}%"
+        update_dialog(message=loading_message + loaded_percentage)
 
-        if dev_mode or _memory.is_memory_critical():
-            while not completed_queue.empty():
+    elif loaded_package_count:
+        loaded_package_count = 0
+        _memory.force_gc()
+
+        load_iterator._next = None
+        for handler in handler_mods:
+            try:
+                next(handler)
+            except StopIteration:
                 pass
-            _memory.await_gc()
+            except Exception as exception:
+                print_exception(exception)
 
-
-def complete_loading() -> None:
-    global thread, package_group_lock, completed_queue
-    thread.join()
-    del thread, package_group_lock, completed_queue
-
-    load_iterator._next = None
-    for handler in handler_mods:
-        try:
-            next(handler)
-        except StopIteration:
-            pass
-        except Exception as exception:
-            print_exception(exception)
-
-    Viewport_Tick.disable()
-    close_dialog()
-    get_pc().GetFrontendMovie().LaunchSaveGameEx(playthrough)
+    else:
+        Viewport_Tick.disable()
+        close_dialog()
+        get_pc().GetFrontendMovie().LaunchSaveGameEx(playthrough)
 
 
 def close_dialog() -> None:

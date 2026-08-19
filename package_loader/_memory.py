@@ -1,18 +1,13 @@
-from mods_base import ENGINE
-
+from mods_base import ENGINE, get_pc
 from unrealsdk.logging import error, info, misc, warning  # pyright: ignore[reportUnusedImport]
 
 import ctypes
 from ctypes import c_size_t, c_long, c_ulong, c_void_p
-
-import threading
 from time import time
 
 CRITICAL_MEMORY = int(1024 * 1024 * 1024 * 3)
 IDLE_MEMORY_RANGE = 1024 * 128
 IDLE_MEMORY_WAIT = 0.5
-
-gc_barrier = threading.Barrier(parties=2)
 
 memory_last_tick = 0
 time_memory_within_range: float | None = None
@@ -69,33 +64,18 @@ def force_gc() -> None:
     time_memory_within_range = None
     garbage_collecting = True
 
-    ENGINE.TimeBetweenPurgingPendingKillObjects = 0.0
-    ENGINE.GetCurrentWorldInfo().ForceGarbageCollection(True)
-    ENGINE.TimeBetweenPurgingPendingKillObjects = float("inf")
+    get_pc().ConsoleCommand("obj garbage")
+    # ENGINE.GetCurrentWorldInfo().ForceGarbageCollection(True)
 
     misc("Performing garbage collection, memory at", memory_last_tick)
 
 
-def await_gc() -> None:
-    gc_barrier.wait()
-
-
-def pause_gc() -> None:
-    ENGINE.TimeBetweenPurgingPendingKillObjects = float("inf")
-
-
-def resume_gc() -> None:
-    global garbage_collecting
-    garbage_collecting = True
-    ENGINE.TimeBetweenPurgingPendingKillObjects = 60.0
-    ENGINE.GetCurrentWorldInfo().ForceGarbageCollection(True)
-
-
-def tick_gc() -> None:
+def tick_gc() -> bool:
     global memory_last_tick, time_memory_within_range, garbage_collecting
 
+    memory = get_memory_usage()
+
     if garbage_collecting:
-        memory = get_memory_usage()
         now = time()
 
         if memory_last_tick - memory > IDLE_MEMORY_RANGE:
@@ -111,10 +91,10 @@ def tick_gc() -> None:
                 misc("Garbage collection completed, memory at", memory)
 
             garbage_collecting = False
-            if gc_barrier.n_waiting:
-                gc_barrier.wait()
 
         memory_last_tick = memory
 
-    elif gc_barrier.n_waiting:
+    elif memory > CRITICAL_MEMORY:
         force_gc()
+
+    return garbage_collecting
