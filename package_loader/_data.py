@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 
 from typing import ClassVar, Iterable, Iterator, Self, Sequence
@@ -49,9 +49,15 @@ class PackageLoadCharacter(StrEnum):
         blacklist: Sequence[str | PackageLoadCharacter] = ()
 
         def __iter__(self) -> Iterator[PackageLoad]:
+            blacklist = tuple(character.lower() for character in self.blacklist)
             return (
-                character for character in PackageLoadCharacter if character not in self.blacklist
+                character
+                for character in PackageLoadCharacter
+                if character.lower() not in blacklist
             )
+
+        def __contains__(self, item: object) -> bool:
+            return isinstance(item, str) and item.lower() in tuple(iter(self))
 
 
 class PackageLoadLevel:
@@ -60,13 +66,13 @@ class PackageLoadLevel:
     will be loaded as a group, in the order indicated in the game's LevelDependencyList objects.
     """
 
-    __slots__ = "name", "persistent_map", "secondary_maps", "dlc"
+    __slots__ = "name", "persistent_map", "packages", "dlc"
 
     name: str
     """The level's human-readable name, e.g. "Southpaw Steam & Power" """
     persistent_map: str
     """The level's persistent map, e.g. "SouthpawFactory_P" """
-    secondary_maps: Sequence[str]
+    packages: Sequence[str]
     """The level's secondary maps"""
     dlc: str | None
     """TODO"""
@@ -74,17 +80,14 @@ class PackageLoadLevel:
     _instances: ClassVar[dict[str, Self]] = dict()
 
     def __new__(cls, persistent_map: str) -> Self:
-        return cls._instances[persistent_map]
+        return cls._instances[persistent_map.lower()]
 
     def __repr__(self) -> str:
         return f'{self.__class__.__name__}("{self.persistent_map}")'
 
-    def packages(self) -> Iterator[str]:
-        """Produces every package that will be loaded for this level, in order."""
-        yield self.persistent_map
-        yield from self.secondary_maps
-
-    @dataclass(kw_only=True)
+    @dataclass(
+        kw_only=True,
+    )
     class All(PackageLoadAll):
         """
         A convenience object that expands to additional objects representing levels to be loaded.
@@ -101,31 +104,59 @@ class PackageLoadLevel:
         persistent_only: bool = False
         blacklist: Sequence[str | PackageLoadLevel] = ()
 
+        normalized_blacklist: Sequence[str] = field(init=False, repr=False, compare=False)
+
+        def __post_init__(self) -> None:
+            self.normalized_blacklist = tuple(
+                level.lower() if isinstance(level, str) else level.persistent_map
+                for level in self.blacklist
+            )
+
         def __iter__(self) -> Iterator[PackageLoad]:
             return (
-                persistent_map if self.persistent_only else level
-                for persistent_map, level in PackageLoadLevel._instances.items()
-                if persistent_map not in self.blacklist and level not in self.blacklist
+                (
+                    persistent_map
+                    for persistent_map in PackageLoadLevel._instances
+                    if persistent_map not in self.normalized_blacklist
+                )
+                if self.persistent_only
+                else (
+                    level
+                    for level in PackageLoadLevel._instances.values()
+                    if level.persistent_map not in self.normalized_blacklist
+                )
             )
 
         def __contains__(self, item: object) -> bool:
-            if self.persistent_only:
-                return isinstance(item, str) and item not in self.blacklist
-            else:
-                return (
-                    isinstance(item, PackageLoadLevel)
-                    and item not in self.blacklist
-                    and item.persistent_map not in self.blacklist
+            if isinstance(item, str):
+                item = item.lower()
+                if item in self.normalized_blacklist:
+                    return False
+                if self.persistent_only:
+                    return item in PackageLoadLevel._instances
+                return any(
+                    item in level.packages
+                    for level in PackageLoadLevel._instances.values()
+                    if level.persistent_map not in self.normalized_blacklist
                 )
+
+            if isinstance(item, PackageLoadLevel):
+                return (
+                    False
+                    if self.persistent_only
+                    else item.persistent_map not in self.normalized_blacklist
+                )
+
+            return False
 
 
 def level(dlc: str, name: str, persistent_map: str, secondary_maps: Sequence[str]) -> None:
     instance = super(PackageLoadLevel, PackageLoadLevel).__new__(PackageLoadLevel)
-    PackageLoadLevel._instances[persistent_map] = instance
+    PackageLoadLevel._instances[persistent_map.lower()] = instance
 
     instance.name = name
-    instance.persistent_map = persistent_map
-    instance.secondary_maps = secondary_maps
+    instance.persistent_map = persistent_map.lower()
+    instance.packages = (instance.persistent_map, *(map.lower() for map in secondary_maps))
     instance.dlc = dlc
 
 

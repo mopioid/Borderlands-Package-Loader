@@ -4,16 +4,16 @@ from ._groups import (
     LoadHandler,
     PackageGroup,
     expand_loads,
-    group_packages,
+    group_loads,
 )
 
 from mods_base import Mod, get_pc, hook
-
 from unrealsdk import find_all, find_class, load_package
-from unrealsdk.logging import error, info, warning  # pyright: ignore[reportUnusedImport]
+from unrealsdk.logging import error, info, misc, warning  # pyright: ignore[reportUnusedImport]
 from unrealsdk.unreal import UObject, WrappedStruct, BoundFunction
 from unrealsdk.hooks import Block as BlockHook
 
+import traceback
 from types import ModuleType
 from typing import Any, Generator, Iterator, Sequence
 
@@ -43,7 +43,9 @@ def get_mod_attr(mod: Mod, field: str) -> Any:
 
 
 def print_exception(exception: Exception) -> None:
-    error(f"{type(exception).__name__}: {", ".join(exception.args)}")
+    if trace := exception.__traceback__:
+        trace = trace.tb_next
+    traceback.print_exception(type(exception), exception, trace)
 
 
 class PackageLoadIterator(Iterator[PackageLoad]):
@@ -190,22 +192,17 @@ def probe_mods() -> None:
         except Exception as exception:
             print_exception(exception)
 
-    package_groups = group_packages(handler_loads)
+    package_groups = group_loads(handler_loads)
     total_package_count = sum(len(package_group.packages) for package_group in package_groups)
 
 
 def begin_loading() -> None:
     global loaded_package_count
+    loaded_package_count = 0
 
     update_dialog(title="Loading Data", message=loading_message + "0%", tooltips="")
 
-    loaded_package_count = 0
-
-    if dev_mode:
-        _memory.IDLE_MEMORY_WAIT = 1.5
-        _memory.force_gc()
-    else:
-        _memory.IDLE_MEMORY_WAIT = 0.5
+    _memory.force_gc()
 
     Frontend_LaunchSaveGameEx.disable()
     Viewport_Tick.enable()
@@ -215,11 +212,23 @@ def begin_loading() -> None:
 def Viewport_Tick(_1: UObject, _2: WrappedStruct, _3: Any, _4: BoundFunction) -> None:
     global package_groups, dialog_ticks, total_package_count, loaded_package_count
 
-    if _memory.tick_gc():
+    _memory.tick_gc()
+    if dev_mode and _memory.garbage_collecting:
         return
 
     if len(package_groups):
-        group = package_groups.pop(0)
+        group = package_groups[0]
+
+        size_estimate = group.get_size_estimate()
+        if _memory.is_memory_critical(size_estimate):
+            if _memory.garbage_collecting:
+                return
+            warning(
+                f"Memory critial at {_memory.get_memory_usage()}"
+                f" with {size_estimate} required for {group.packages}"
+            )
+
+        del package_groups[0]
 
         packages = group.get_load_sequence()
         for package in packages:
@@ -233,40 +242,43 @@ def Viewport_Tick(_1: UObject, _2: WrappedStruct, _3: Any, _4: BoundFunction) ->
             load_iterator._allow_next = True
             try:
                 next(handler)
-
             except Exception as exception:
                 del handler_mods[handler]
 
-                total_package_count = 0
-                for package_group in package_groups:
+                total_package_count = loaded_package_count
+
+                for package_group in tuple(package_groups):
                     package_group.remove_handler(handler)
 
-                    if len(package_group.handler_loads):
-                        total_package_count += len(package_group.packages)
+                    if package_count := len(package_group.packages):
+                        total_package_count += package_count
                     else:
                         package_groups.remove(package_group)
 
                 if not isinstance(exception, StopIteration):
                     print_exception(exception)
 
-        loaded_package_count += len(packages)
-        loaded_percentage = f"{loaded_package_count / total_package_count * 100:.0f}%"
-        update_dialog(message=loading_message + loaded_percentage)
-
-    elif loaded_package_count:
-        loaded_package_count = 0
         _memory.force_gc()
 
-        load_iterator._next = None
-        for handler in handler_mods:
-            try:
-                next(handler)
-            except StopIteration:
-                pass
-            except Exception as exception:
-                print_exception(exception)
+        loaded_package_count += len(packages)
+        loaded_percentage = (
+            f"{loaded_package_count / total_package_count * 100:.0f}%"
+            if total_package_count > 0
+            else "100%"
+        )
+        update_dialog(message=loading_message + loaded_percentage)
 
-    else:
+        if not len(package_groups):
+            load_iterator._next = None
+            for handler in handler_mods:
+                try:
+                    next(handler)
+                except StopIteration:
+                    pass
+                except Exception as exception:
+                    print_exception(exception)
+
+    elif not _memory.garbage_collecting:
         Viewport_Tick.disable()
         close_dialog()
         get_pc().GetFrontendMovie().LaunchSaveGameEx(playthrough)

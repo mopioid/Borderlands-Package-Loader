@@ -2,11 +2,25 @@ from __future__ import annotations
 
 from ._data import PackageLoad, PackageLoadAll, PackageLoadLevel, PackageLoaderError
 
-from functools import cached_property
-
+import os
+import sys
+from functools import cache, cached_property
 from typing import Generator, Iterable, Sequence
 
 type LoadHandler = Generator[None, None, None]
+
+
+@cache
+def upk_sizes() -> dict[str, int]:
+    upks: dict[str, int] = dict()
+    game_dir = os.path.dirname(os.path.dirname(os.path.dirname(sys.executable)))
+    for dirpath, _, filenames in os.walk(game_dir):
+        for filename in filenames:
+            filename = filename.lower()
+            if filename.endswith(".upk"):
+                upk_path = os.path.join(dirpath, filename)
+                upks[os.path.splitext(filename)[0]] = os.stat(upk_path).st_size
+    return upks
 
 
 def expand_loads(loads: Sequence[PackageLoad]) -> Iterable[PackageLoad]:
@@ -17,18 +31,18 @@ def expand_loads(loads: Sequence[PackageLoad]) -> Iterable[PackageLoad]:
             yield load
 
 
-def get_load_packages(load: PackageLoad) -> Sequence[str]:
+def get_load_packages(load: PackageLoad) -> list[str]:
     if isinstance(load, str):
-        return (load,)
+        return [load.lower()]
     if isinstance(load, PackageLoadLevel):
-        return tuple(load.packages())
+        return list(load.packages)
     if isinstance(load, Sequence):
         for package in load:
             if not isinstance(package, str):  # pyright: ignore[reportUnnecessaryIsInstance]
                 raise PackageLoaderError(
                     f"Package Sequences must be of package names, not {package}"
                 )
-        return load
+        return [package.lower() for package in load]
     raise PackageLoaderError(f"Invalid package load specification: {load}")
 
 
@@ -70,27 +84,33 @@ class PackageGroup:
             for load in loads:
                 self.add_handler_load(handler, load)
 
+    def get_size_estimate(self) -> int:
+        sizes = upk_sizes()
+        return sum(sizes[package] for package in self.packages)
+
     def get_load_sequence(self) -> Sequence[str]:
         sequence: list[str] = list()
 
         for _, load in self.all_loads():
             if isinstance(load, str):
+                load = load.lower()
                 if load not in sequence:
                     sequence.append(load)
 
             elif isinstance(load, Sequence):
-                packages = list(get_load_packages(load))
+                packages = get_load_packages(load)
                 sequence = packages + [package for package in sequence if package not in packages]
 
         for _, load in self.all_loads():
             if isinstance(load, PackageLoadLevel):
-                packages = list(load.packages())
-                sequence = packages + [package for package in sequence if package not in packages]
+                sequence = list(load.packages) + [
+                    package for package in sequence if package not in load.packages
+                ]
 
         return sequence
 
 
-def group_packages(handler_loads: dict[LoadHandler, Sequence[PackageLoad]]) -> list[PackageGroup]:
+def group_loads(handler_loads: dict[LoadHandler, Sequence[PackageLoad]]) -> list[PackageGroup]:
     groups: list[PackageGroup] = list()
 
     for handler, loads in handler_loads.items():
