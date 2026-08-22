@@ -64,7 +64,9 @@ def force_gc() -> None:
     time_memory_within_range = None
     garbage_collecting = True
 
+    ENGINE.TimeBetweenPurgingPendingKillObjects = 0
     ENGINE.GetCurrentWorldInfo().ForceGarbageCollection(True)
+    ENGINE.TimeBetweenPurgingPendingKillObjects = float("inf")
     # get_pc().ConsoleCommand("obj garbage")
 
     # misc("Performing garbage collection, memory at", memory_last_tick)

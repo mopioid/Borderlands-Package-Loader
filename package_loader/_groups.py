@@ -1,26 +1,12 @@
 from __future__ import annotations
 
+from . import _data
 from ._data import PackageLoad, PackageLoadAll, PackageLoadLevel, PackageLoaderError
 
-import os
-import sys
-from functools import cache, cached_property
+from functools import cached_property
 from typing import Generator, Iterable, Sequence
 
 type LoadHandler = Generator[None, None, None]
-
-
-@cache
-def upk_sizes() -> dict[str, int]:
-    upks: dict[str, int] = dict()
-    game_dir = os.path.dirname(os.path.dirname(os.path.dirname(sys.executable)))
-    for dirpath, _, filenames in os.walk(game_dir):
-        for filename in filenames:
-            filename = filename.lower()
-            if filename.endswith(".upk"):
-                upk_path = os.path.join(dirpath, filename)
-                upks[os.path.splitext(filename)[0]] = os.stat(upk_path).st_size
-    return upks
 
 
 def expand_loads(loads: Sequence[PackageLoad]) -> Iterable[PackageLoad]:
@@ -85,8 +71,7 @@ class PackageGroup:
                 self.add_handler_load(handler, load)
 
     def get_size_estimate(self) -> int:
-        sizes = upk_sizes()
-        return sum(sizes[package] for package in self.packages)
+        return sum(_data.package_sizes.get(package, 0) for package in self.packages)
 
     def get_load_sequence(self) -> Sequence[str]:
         sequence: list[str] = list()
@@ -130,4 +115,5 @@ def group_loads(handler_loads: dict[LoadHandler, Sequence[PackageLoad]]) -> list
             else:
                 groups.append(PackageGroup(handler, load))
 
+    groups.sort(key=PackageGroup.get_size_estimate, reverse=True)
     return groups

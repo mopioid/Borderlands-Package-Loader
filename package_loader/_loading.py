@@ -13,6 +13,7 @@ from unrealsdk.logging import error, info, misc, warning  # pyright: ignore[repo
 from unrealsdk.unreal import UObject, WrappedStruct, BoundFunction
 from unrealsdk.hooks import Block as BlockHook
 
+from time import sleep
 import traceback
 from types import ModuleType
 from typing import Any, Generator, Iterator, Sequence
@@ -263,7 +264,7 @@ def Viewport_Tick(_1: UObject, _2: WrappedStruct, _3: Any, _4: BoundFunction) ->
         loaded_package_count += len(packages)
         loaded_percentage = (
             f"{loaded_package_count / total_package_count * 100:.0f}%"
-            if total_package_count > 0
+            if total_package_count
             else "100%"
         )
         update_dialog(message=loading_message + loaded_percentage)
