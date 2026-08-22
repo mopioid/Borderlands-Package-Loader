@@ -1,18 +1,13 @@
 from mods_base import ENGINE
-
 from unrealsdk.logging import error, info, misc, warning  # pyright: ignore[reportUnusedImport]
 
 import ctypes
 from ctypes import c_size_t, c_long, c_ulong, c_void_p
-
-import threading
 from time import time
 
-CRITICAL_MEMORY = int(1024 * 1024 * 1024 * 3)
+CRITICAL_MEMORY = int(1024 * 1024 * 1024 * 2.8)
 IDLE_MEMORY_RANGE = 1024 * 128
-IDLE_MEMORY_WAIT = 0.5
-
-gc_barrier = threading.Barrier(parties=2)
+IDLE_MEMORY_WAIT = 1.5
 
 memory_last_tick = 0
 time_memory_within_range: float | None = None
@@ -58,8 +53,8 @@ def get_memory_usage() -> int:
     raise ctypes.WinError()
 
 
-def is_memory_critical() -> bool:
-    return get_memory_usage() > CRITICAL_MEMORY
+def is_memory_critical(needed: int = 0) -> bool:
+    return get_memory_usage() + needed > CRITICAL_MEMORY
 
 
 def force_gc() -> None:
@@ -69,52 +64,33 @@ def force_gc() -> None:
     time_memory_within_range = None
     garbage_collecting = True
 
-    ENGINE.TimeBetweenPurgingPendingKillObjects = 0.0
+    ENGINE.TimeBetweenPurgingPendingKillObjects = 0
     ENGINE.GetCurrentWorldInfo().ForceGarbageCollection(True)
     ENGINE.TimeBetweenPurgingPendingKillObjects = float("inf")
+    # get_pc().ConsoleCommand("obj garbage")
 
-    misc("Performing garbage collection, memory at", memory_last_tick)
-
-
-def await_gc() -> None:
-    gc_barrier.wait()
+    # misc("Performing garbage collection, memory at", memory_last_tick)
 
 
-def pause_gc() -> None:
-    ENGINE.TimeBetweenPurgingPendingKillObjects = float("inf")
-
-
-def resume_gc() -> None:
-    global garbage_collecting
-    garbage_collecting = True
-    ENGINE.TimeBetweenPurgingPendingKillObjects = 60.0
-    ENGINE.GetCurrentWorldInfo().ForceGarbageCollection(True)
-
-
-def tick_gc() -> None:
+def tick_gc():
     global memory_last_tick, time_memory_within_range, garbage_collecting
 
-    if garbage_collecting:
-        memory = get_memory_usage()
-        now = time()
+    if not garbage_collecting:
+        return
 
-        if memory_last_tick - memory > IDLE_MEMORY_RANGE:
-            time_memory_within_range = None
+    memory = get_memory_usage()
+    now = time()
 
-        elif not time_memory_within_range:
-            time_memory_within_range = now
+    if memory_last_tick - memory > IDLE_MEMORY_RANGE:
+        time_memory_within_range = None
 
-        elif time_memory_within_range + IDLE_MEMORY_WAIT <= now:
-            if memory > CRITICAL_MEMORY:
-                warning("Garbage collection completed, memory still critial at", memory)
-            else:
-                misc("Garbage collection completed, memory at", memory)
+    elif not time_memory_within_range:
+        time_memory_within_range = now
 
-            garbage_collecting = False
-            if gc_barrier.n_waiting:
-                gc_barrier.wait()
+    elif time_memory_within_range + IDLE_MEMORY_WAIT <= now:
+        garbage_collecting = False
 
-        memory_last_tick = memory
+        if is_memory_critical():
+            warning("Memory critial at", memory)
 
-    elif gc_barrier.n_waiting:
-        force_gc()
+    memory_last_tick = memory
