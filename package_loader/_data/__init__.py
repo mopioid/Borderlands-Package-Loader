@@ -109,7 +109,11 @@ class PackageLoadLevel:
     _instances: ClassVar[dict[str, Self]] = dict()
 
     def __new__(cls, persistent_map: str) -> Self:
-        return cls._instances[persistent_map.lower()]
+        if level := cls._instances.get(persistent_map.lower(), None):
+            return level
+        raise PackageLoaderError(
+            f"Level '{persistent_map}' does not exist in {Game.get_current().name}"
+        )
 
     @dataclass(kw_only=True, frozen=True)
     class All(PackageLoadAll):

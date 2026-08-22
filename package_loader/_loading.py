@@ -6,14 +6,13 @@ from ._groups import (
     expand_loads,
     group_loads,
 )
+from . import _ui
 
-from mods_base import Mod, get_pc, hook
-from unrealsdk import find_all, find_class, load_package
-from unrealsdk.logging import error, info, misc, warning  # pyright: ignore[reportUnusedImport]
+from mods_base import Mod, hook
+from unrealsdk import load_package
 from unrealsdk.unreal import UObject, WrappedStruct, BoundFunction
-from unrealsdk.hooks import Block as BlockHook
+from unrealsdk.logging import error, info, misc, warning  # pyright: ignore[reportUnusedImport]
 
-from time import sleep
 import traceback
 from types import ModuleType
 from typing import Any, Generator, Iterator, Sequence
@@ -66,95 +65,11 @@ class PackageLoadIterator(Iterator[PackageLoad]):
 
 load_iterator = PackageLoadIterator()
 
-playthrough: int
-
 handler_mods: dict[LoadHandler, Mod]
 package_groups: list[PackageGroup]
 
-gfx_dialog: UObject
-loading_message: str
 total_package_count: int = 0
 loaded_package_count: int = 0
-
-
-@hook("WillowGame.FrontendGFxMovie:LaunchSaveGameEx", immediately_enable=True)
-def Frontend_LaunchSaveGameEx(
-    _1: UObject, args: WrappedStruct, _3: Any, _4: BoundFunction
-) -> type[BlockHook] | None:
-    global playthrough
-
-    probe_mods()
-
-    if total_package_count > 0:
-        playthrough = args.PlayThrough
-        start_dialog(confirmation=total_package_count > 100)
-        return BlockHook
-
-
-def start_dialog(*, confirmation: bool) -> None:
-    global gfx_dialog, loading_message
-
-    Default__WillowGFxDialogBox = find_class("WillowGFxDialogBox").ClassDefaultObject
-    for other_dialog_box in find_all(Default__WillowGFxDialogBox.Class):
-        if other_dialog_box is not Default__WillowGFxDialogBox:
-            other_dialog_box.Close()
-
-    gfx_dialog = get_pc().GFxUIManager.ShowDialog()
-    gfx_dialog.SetPriority(254)
-
-    mod_name_list = [f"<font color='#FFDD88'>{mod.name}</font>" for mod in handler_mods.values()]
-    if len(mod_name_list) > 2:
-        mod_names = f"{", ".join(mod_name_list[:-1])}, and {mod_name_list[-1]}"
-    elif len(mod_name_list) == 2:
-        mod_names = f"{mod_name_list[0]} and {mod_name_list[1]}"
-    else:
-        mod_names = mod_name_list[0]
-
-    loading_message = (
-        f"The mod{f"s {mod_names} are" if len(mod_name_list) > 1 else f" {mod_names} is"} currently"
-        " loading data. This may take some time.\n\nLoaded: "
-    )
-
-    if confirmation:
-        update_dialog(
-            title="Loading Data",
-            message=f"Before you begin the game, the mod{"s" if len(mod_name_list) > 1 else ""}"
-            f" {mod_names} must load data, which may take some time. Would you like to continue?",
-            tooltips="<StringAliasMap:GFx_Accept> Continue     <StringAliasMap:GFx_Cancel> Cancel",
-        )
-    else:
-        begin_loading()
-
-    DialogBox_HandleInputKey.enable()
-
-
-def update_dialog(
-    *,
-    title: str | None = None,
-    message: str | None = None,
-    tooltips: str | None = None,
-) -> None:
-    if title is not None:
-        gfx_dialog.DlgCaptionMarkup = title
-    if message is not None:
-        gfx_dialog.DlgTextMarkup = message
-    if tooltips == "":
-        gfx_dialog.ShowTooltips(False)
-    elif tooltips is not None:
-        gfx_dialog.SetTooltips(tooltips)
-    gfx_dialog.ApplyLayout()
-
-
-@hook("WillowGame.WillowGFxDialogBox:HandleInputKey")
-def DialogBox_HandleInputKey(
-    obj: UObject, args: WrappedStruct, _3: Any, _4: BoundFunction
-) -> type[BlockHook] | None:
-    if args.uevent == 1 and obj.GetVariableBool("tooltips._visible"):
-        if args.ukey in ("Enter", "XboxTypeS_A"):
-            begin_loading()
-        elif args.ukey in ("Escape", "XboxTypeS_B"):
-            close_dialog()
-    return BlockHook
 
 
 def probe_mods() -> None:
@@ -201,11 +116,10 @@ def begin_loading() -> None:
     global loaded_package_count
     loaded_package_count = 0
 
-    update_dialog(title="Loading Data", message=loading_message + "0%", tooltips="")
+    _ui.begin_loading_dialog()
 
     _memory.force_gc()
 
-    Frontend_LaunchSaveGameEx.disable()
     Viewport_Tick.enable()
 
 
@@ -262,12 +176,9 @@ def Viewport_Tick(_1: UObject, _2: WrappedStruct, _3: Any, _4: BoundFunction) ->
         _memory.force_gc()
 
         loaded_package_count += len(packages)
-        loaded_percentage = (
-            f"{loaded_package_count / total_package_count * 100:.0f}%"
-            if total_package_count
-            else "100%"
+        _ui.set_loading_dialog(
+            loaded_package_count / total_package_count * 100 if total_package_count else 100
         )
-        update_dialog(message=loading_message + loaded_percentage)
 
         if not len(package_groups):
             load_iterator._next = None
@@ -281,12 +192,4 @@ def Viewport_Tick(_1: UObject, _2: WrappedStruct, _3: Any, _4: BoundFunction) ->
 
     elif not _memory.garbage_collecting:
         Viewport_Tick.disable()
-        close_dialog()
-        get_pc().GetFrontendMovie().LaunchSaveGameEx(playthrough)
-
-
-def close_dialog() -> None:
-    global gfx_dialog
-    gfx_dialog.Close()
-    del gfx_dialog
-    DialogBox_HandleInputKey.disable()
+        _ui.continue_game()
