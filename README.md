@@ -28,8 +28,8 @@ package_loads: list[PackageLoad] = [
 `package_loads` may be specified in either the top-level of your mod's module, or in its custom Mod
 class.
 
-To receive notice when loading is taking place, you define the function `on_load_packages`, also
-either in the mod's module or its class:
+To handle loads when they take place, you define the function `on_load_packages`, also either in the
+mod's module or its class:
 ```py
 all_pawns: set[unrealsdk.unreal.UObject] = set()
 all_vehicles: set[unrealsdk.unreal.UObject] = set()
@@ -44,8 +44,8 @@ def on_load_packages(loads: Iterable[PackageLoad]):
             all_vehicles.add(vehicle)
         yield
 ```
-Note that `package_loads` must completely iterate over the `Iterable` object passed to it, and also
-it must yield at the end of each iteration to await the next load.
+The `Iterable` object passed to `on_load_packages` will produce entries from `package_loads` as they
+loaded. Note that you *must* yield at the end of each iteration to await the next load.
 
 Finally, your mod registers itself with Package Loader:
 

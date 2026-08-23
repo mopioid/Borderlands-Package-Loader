@@ -53,8 +53,8 @@ class PackageGroup:
         packages.update(*(get_load_packages(load) for _, load in self.all_loads()))
         return packages
 
-    def has_overlap(self, load: PackageLoad) -> bool:
-        return bool(self.packages.intersection(get_load_packages(load)))
+    def has_overlap(self, packages: Sequence[str]) -> bool:
+        return bool(self.packages.intersection(packages))
 
     def add_handler_load(self, handler: LoadHandler, load: PackageLoad) -> None:
         self.handler_loads.setdefault(handler, list()).append(load)
@@ -100,15 +100,17 @@ def group_loads(handler_loads: dict[LoadHandler, Sequence[PackageLoad]]) -> list
 
     for handler, loads in handler_loads.items():
         for load in loads:
+            load_packages = get_load_packages(load)
+
             groups_index = 0
             while groups_index < len(groups):
                 group = groups[groups_index]
                 groups_index += 1
 
-                if group.has_overlap(load):
+                if group.has_overlap(load_packages):
                     group.add_handler_load(handler, load)
                     for further_group in tuple(groups[groups_index:]):
-                        if further_group.has_overlap(load):
+                        if further_group.has_overlap(load_packages):
                             group.merge_group(further_group)
                             groups.remove(further_group)
                     break
