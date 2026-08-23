@@ -9,11 +9,11 @@ __all__ = (
     "register_mod",
     "deregister_mod",
     "mod_list",
-    "set_dev_mode",
     "PackageLoad",
     "PackageLoadCharacter",
     "PackageLoadLevel",
     "PackageLoaderError",
+    "set_dev_mode",
 )
 
 

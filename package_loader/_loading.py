@@ -192,4 +192,4 @@ def Viewport_Tick(_1: UObject, _2: WrappedStruct, _3: Any, _4: BoundFunction) ->
 
     elif not _memory.garbage_collecting:
         Viewport_Tick.disable()
-        _ui.continue_game()
+        _ui.continue_frontend()

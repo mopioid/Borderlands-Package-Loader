@@ -1,92 +1,49 @@
 from . import _loading
 
 from mods_base import get_pc, hook
-from unrealsdk import find_all, find_class
+from unrealsdk import find_all, hooks
 from unrealsdk.unreal import UObject, WrappedStruct, BoundFunction
-from unrealsdk.hooks import Block as BlockHook
 
-from enum import IntEnum
+from copy import deepcopy
 from typing import Any
 
 gfx_dialog: UObject
 loading_message: str
 
+frontend_func: BoundFunction
+frontend_args: WrappedStruct
 
-class GameSelection(IntEnum):
-    NewGame = -1
-    Matchmaking = -2
-    LanBrowser = -3
-    OnlineBrowser = -4
+frontend_intercepts = ("LaunchSaveGameEx", "LaunchNewGame", "StartMatchmaking", "ShowServerBrowser")
 
 
-game_selection: int
-
-
-@hook("WillowGame.FrontendGFxMovie:LaunchSaveGameEx", immediately_enable=True)
-def Frontend_LaunchSaveGameEx(
-    _1: UObject, args: WrappedStruct, _3: Any, _4: BoundFunction
-) -> type[BlockHook] | None:
-    global game_selection
+def intercept_frontend(
+    _1: UObject, args: WrappedStruct, _3: Any, func: BoundFunction
+) -> type[hooks.Block] | None:
+    global frontend_func, frontend_args
 
     _loading.probe_mods()
-
-    if _loading.total_package_count > 0:
-        game_selection = args.PlayThrough
+    if _loading.total_package_count:
         show_dialog(confirmation=_loading.total_package_count > 100)
-        return BlockHook
+
+        frontend_func = func
+        frontend_args = deepcopy(args)
+        return hooks.Block
 
 
-@hook("WillowGame.FrontendGFxMovie:LaunchNewGame", immediately_enable=True)
-def Frontend_LaunchNewGame(
-    _1: UObject, _2: WrappedStruct, _3: Any, _4: BoundFunction
-) -> type[BlockHook] | None:
-    global game_selection
-
-    _loading.probe_mods()
-
-    if _loading.total_package_count > 0:
-        game_selection = GameSelection.NewGame
-        show_dialog(confirmation=_loading.total_package_count > 100)
-        return BlockHook
-
-
-@hook("WillowGame.FrontendGFxMovie:StartMatchmaking", immediately_enable=True)
-def Frontend_StartMatchmaking(
-    _1: UObject, _2: WrappedStruct, _3: Any, _4: BoundFunction
-) -> type[BlockHook] | None:
-    global game_selection
-
-    _loading.probe_mods()
-
-    if _loading.total_package_count > 0:
-        game_selection = GameSelection.Matchmaking
-        show_dialog(confirmation=_loading.total_package_count > 100)
-        return BlockHook
-
-
-@hook("WillowGame.FrontendGFxMovie:ShowServerBrowser", immediately_enable=True)
-def Frontend_ShowServerBrowser(
-    _1: UObject, args: WrappedStruct, _3: Any, _4: BoundFunction
-) -> type[BlockHook] | None:
-    global game_selection
-
-    _loading.probe_mods()
-
-    if _loading.total_package_count > 0:
-        if args.bIsLanBrowser:
-            game_selection = GameSelection.LanBrowser
-        else:
-            game_selection = GameSelection.OnlineBrowser
-        show_dialog(confirmation=_loading.total_package_count > 100)
-        return BlockHook
+for func_name in frontend_intercepts:
+    hooks.add_hook(
+        func="WillowGame.FrontendGFxMovie:" + func_name,
+        type=hooks.Type.PRE,
+        identifier=__file__,
+        callback=intercept_frontend,
+    )
 
 
 def show_dialog(*, confirmation: bool) -> None:
     global gfx_dialog, loading_message
 
-    Default__WillowGFxDialogBox = find_class("WillowGFxDialogBox").ClassDefaultObject
-    for other_dialog_box in find_all(Default__WillowGFxDialogBox.Class):
-        if other_dialog_box is not Default__WillowGFxDialogBox:
+    for other_dialog_box in find_all("WillowGFxDialogBox", exact=False):
+        if other_dialog_box is not other_dialog_box.Class.ClassDefaultObject:
             other_dialog_box.Close()
 
     gfx_dialog = get_pc().GFxUIManager.ShowDialog()
@@ -124,10 +81,12 @@ def show_dialog(*, confirmation: bool) -> None:
 
 
 def begin_loading_dialog() -> None:
-    Frontend_LaunchSaveGameEx.disable()
-    Frontend_LaunchNewGame.disable()
-    Frontend_StartMatchmaking.disable()
-    Frontend_ShowServerBrowser.disable()
+    for func_name in frontend_intercepts:
+        hooks.remove_hook(
+            func="WillowGame.FrontendGFxMovie:" + func_name,
+            type=hooks.Type.PRE,
+            identifier=__file__,
+        )
 
     gfx_dialog.DlgCaptionMarkup = "Loading Data"
     gfx_dialog.DlgTextMarkup = loading_message + "0%"
@@ -143,13 +102,13 @@ def set_loading_dialog(percentage: float) -> None:
 @hook("WillowGame.WillowGFxDialogBox:HandleInputKey")
 def DialogBox_HandleInputKey(
     obj: UObject, args: WrappedStruct, _3: Any, _4: BoundFunction
-) -> type[BlockHook] | None:
+) -> type[hooks.Block] | None:
     if args.uevent == 1 and obj.GetVariableBool("tooltips._visible"):
         if args.ukey in ("Enter", "XboxTypeS_A"):
             _loading.begin_loading()
         elif args.ukey in ("Escape", "XboxTypeS_B"):
             close_dialog()
-    return BlockHook
+    return hooks.Block
 
 
 def close_dialog() -> None:
@@ -159,18 +118,8 @@ def close_dialog() -> None:
     DialogBox_HandleInputKey.disable()
 
 
-def continue_game() -> None:
+def continue_frontend() -> None:
+    global frontend_func, frontend_args
     close_dialog()
-
-    frontend = get_pc().GetFrontendMovie()
-
-    if game_selection == GameSelection.NewGame:
-        frontend.LaunchNewGame()
-    elif game_selection == GameSelection.Matchmaking:
-        frontend.StartMatchmaking()
-    elif game_selection == GameSelection.LanBrowser:
-        frontend.ShowServerBrowser(True)
-    elif game_selection == GameSelection.OnlineBrowser:
-        frontend.ShowServerBrowser(False)
-    else:
-        frontend.LaunchSaveGameEx(game_selection)
+    frontend_func(frontend_args)
+    del frontend_func, frontend_args
