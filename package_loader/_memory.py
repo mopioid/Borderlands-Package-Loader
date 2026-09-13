@@ -47,9 +47,9 @@ GetProcessMemoryInfo.restype = c_long
 
 
 def get_memory_usage() -> int:
-    memory = PROCESS_MEMORY_COUNTERS()
-    if GetProcessMemoryInfo(CURRENT_PROCESS, ctypes.byref(memory), ctypes.sizeof(memory)):
-        return memory.PrivateUsage
+    counters = PROCESS_MEMORY_COUNTERS()
+    if GetProcessMemoryInfo(CURRENT_PROCESS, ctypes.byref(counters), ctypes.sizeof(counters)):
+        return counters.PrivateUsage
     raise ctypes.WinError()
 
 

@@ -1,5 +1,5 @@
 [project]
-name = "Package Loader"
+name = "BorderlandsPackageLoader"
 version = "1.0"
 authors = [{ name = "mopioid" }]
 description = """
@@ -15,5 +15,5 @@ Repository = "https://github.com/mopioid/Borderlands-Package-Loader.git"
 [tool.sdkmod]
 name = "Package Loader"
 supported_games = ["BL2", "TPS", "AoDK"]
-download = "https://github.com/mopioid/Borderlands-Package-Loader/raw/refs/heads/master/package_loader.sdkmod"
+download = "https://github.com/mopioid/Borderlands-Package-Loader/raw/refs/heads/main/package_loader.sdkmod"
 license = { name = "MIT", url = "https://choosealicense.com/licenses/mit/" }

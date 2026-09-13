@@ -20,18 +20,29 @@ __all__ = (
 mods_base.build_mod(cls=mods_base.Library)
 
 
-def register_mod(mod: mods_base.Mod) -> None:
-    if mod not in mod_list:
-        if not (module := inspect.getmodule(inspect.stack()[1].frame)):
-            raise PackageLoaderError(f"Could not determine module for mod {mod.name}")
-        mod_list.append(mod)
-        mod_modules[id(mod)] = module
+def register_mod(mod: mods_base.Mod) -> mods_base.Mod:
+    module = inspect.getmodule(inspect.stack()[1].frame)
+    if not module:
+        raise PackageLoaderError(f"Could not determine module for mod {mod.name}")
+
+    for old_mod_id, old_mod_module in mod_modules.items():
+        if old_mod_module is module:
+            del mod_modules[old_mod_id]
+            for old_mod in mod_list:
+                if id(old_mod) == old_mod_id:
+                    mod_list.remove(old_mod)
+            break
+
+    mod_list.append(mod)
+    mod_modules[id(mod)] = module
+    return mod
 
 
-def deregister_mod(mod: mods_base.Mod) -> None:
+def deregister_mod(mod: mods_base.Mod) -> mods_base.Mod:
     if mod in mod_list:
         mod_list.remove(mod)
         del mod_modules[id(mod)]
+    return mod
 
 
 """

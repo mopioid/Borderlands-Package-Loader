@@ -90,7 +90,7 @@ class PackageLoadCharacter(StrEnum):
             return isinstance(item, str) and item.lower() in tuple(iter(self))
 
 
-@dataclass(frozen=True, init=False, eq=False, slots=True)
+@dataclass(frozen=True, init=False, eq=False, repr=False, slots=True)
 class PackageLoadLevel:
     """
     An object representing packages to be loaded for a specific level. All packages for the level
@@ -103,7 +103,7 @@ class PackageLoadLevel:
     """The level's persistent map, e.g. "SouthpawFactory_P" """
     packages: Sequence[str] = field(repr=False, hash=False, compare=False)
     """The level's secondary maps"""
-    dlc: str | None = field(repr=False, hash=False, compare=False)
+    dlc: str = field(repr=False, hash=False, compare=False)
     """TODO"""
 
     _instances: ClassVar[dict[str, Self]] = dict()
@@ -114,6 +114,12 @@ class PackageLoadLevel:
         raise PackageLoaderError(
             f"Level '{persistent_map}' does not exist in {Game.get_current().name}"
         )
+
+    def __repr__(self) -> str:
+        return f'{type(self).__qualname__}("{self.persistent_map}")'
+
+    def __str__(self) -> str:
+        return repr(self)
 
     @dataclass(kw_only=True, frozen=True)
     class All(PackageLoadAll):
